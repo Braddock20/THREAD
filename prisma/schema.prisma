@@ -1,0 +1,40 @@
+// Glass Journal — Prisma schema
+// Single-user, private, X/Threads-style personal feed.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  content   String?
+  parentId  String?
+  parent    Post?    @relation("PostThread", fields: [parentId], references: [id])
+  replies   Post[]   @relation("PostThread")
+  tags      String[]
+  media     Media[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+model Media {
+  id        String   @id @default(cuid())
+  postId    String?  // null = uploaded but not yet attached to a post
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  type      String   // image | video | audio | file | apk | voice_note
+  url       String
+  filename  String
+  mimeType  String
+  size      Int
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
