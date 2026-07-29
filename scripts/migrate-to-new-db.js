@@ -49,7 +49,21 @@ function extractKey(url) {
 async function main() {
   console.log("Reading from OLD database (read-only)...");
   const posts = await oldDb.post.findMany({ orderBy: { createdAt: "asc" } });
-  const media = await oldDb.media.findMany({ orderBy: { createdAt: "asc" } });
+  // Explicit select — the OLD database doesn't have the `key` column yet,
+  // so we can't let Prisma select it by default.
+  const media = await oldDb.media.findMany({
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      postId: true,
+      type: true,
+      url: true,
+      filename: true,
+      mimeType: true,
+      size: true,
+      createdAt: true,
+    },
+  });
   console.log(`Found ${posts.length} post(s), ${media.length} media row(s).`);
 
   console.log("Writing posts to NEW database...");
