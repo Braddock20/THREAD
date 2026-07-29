@@ -1,10 +1,7 @@
 // src/routes/media.js — POST /media/upload
 // Uploads a file to B2 (or local driver), records a Media row.
-// If a post_id is provided, the media is attached to that post immediately.
-// Otherwise the media is orphan (postId = null) and can be attached via
-// POST /posts { mediaIds: [...] }.
-//
-// Allowed kinds: image, video, audio, file, apk, voice_note.
+// Media URLs are now permanent — they point at our own /media/blob/:key
+// route, which mints a fresh signed B2 URL and redirects on every request.
 import { v4 as uuidv4 } from "uuid";
 import prisma from "../lib/prisma.js";
 import cfg from "../config.js";
@@ -13,6 +10,14 @@ import { detectMediaType, finalizeMediaType, sanitizeFilenameForKey, ALLOWED_MIM
 
 export default async function mediaRoutes(app) {
   app.get("/allowed-mimes", async () => ({ mimes: ALLOWED_MIMES }));
+
+  // Permanent link: mints a fresh signed URL and redirects, every request.
+  app.get("/blob/:key", async (req, reply) => {
+    const key = decodeURIComponent(req.params.key);
+    let target = await getSignedDownloadUrl(key, 300); // fresh 5-min token
+    if (target.startsWith("/")) target = absolutizeLocalUrl(req, target);
+    return reply.redirect(302, target);
+  });
 
   app.post("/upload", async (req, reply) => {
     if (!req.isMultipart()) {
@@ -59,7 +64,6 @@ export default async function mediaRoutes(app) {
 
     const mediaType = finalizeMediaType(detection.kind, filename, buf.length);
 
-    // Upload to storage
     const key = `media/${uuidv4()}/${sanitizeFilenameForKey(filename || "file")}`;
     try {
       await uploadBuffer(key, buf, detection.mime);
@@ -68,11 +72,10 @@ export default async function mediaRoutes(app) {
       return reply.code(502).send({ error: "storage_upload_failed", detail: err.message });
     }
 
-    // Build the URL
-    let url = await getSignedDownloadUrl(key);
-    if (url.startsWith("/")) url = absolutizeLocalUrl(req, url);
+    // PERMANENT URL — points at our own server, which mints a fresh
+    // signed B2 URL on every request. Never expires from the client's side.
+    const url = absolutizeLocalUrl(req, `/media/blob/${encodeURIComponent(key)}`);
 
-    // Persist Media row
     let media;
     try {
       media = await prisma.media.create({
@@ -80,13 +83,13 @@ export default async function mediaRoutes(app) {
           postId: postId || null,
           type: mediaType,
           url,
+          key,
           filename: filename || "file",
           mimeType: detection.mime,
           size: buf.length,
         },
       });
     } catch (err) {
-      // DB insert failed — clean up storage to avoid orphans.
       try { await deleteObject(key); } catch {}
       req.log.error({ err: err?.message }, "media row insert failed");
       return reply.code(500).send({ error: "media_persist_failed", detail: err.message });
