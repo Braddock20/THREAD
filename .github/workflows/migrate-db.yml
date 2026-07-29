@@ -1,0 +1,28 @@
+name: Migrate DB to new database
+
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - name: Create schema in new (empty) database
+        run: npx prisma db push
+        env:
+          DATABASE_URL: ${{ secrets.NEW_DATABASE_URL }}
+
+      - name: Copy posts + media from old database
+        run: node scripts/migrate-to-new-db.js
+        env:
+          OLD_DATABASE_URL: ${{ secrets.OLD_DATABASE_URL }}
+          NEW_DATABASE_URL: ${{ secrets.NEW_DATABASE_URL }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
