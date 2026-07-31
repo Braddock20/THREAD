@@ -1,5 +1,9 @@
-// src/routes/media.js — POST /media/upload
-// Uploads a file to B2 (or local driver), records a Media row.
+// src/routes/media.js — POST /media/upload, GET /media/blob/:key
+// Uploads a file to B2 (or local driver), records a Media row with a
+// PERMANENT url (/media/blob/:key) instead of a raw signed B2 URL.
+// GET /media/blob/:key mints a fresh short-lived signed URL and redirects
+// on every request, so the link stored in the DB never expires.
+//
 // If a post_id is provided, the media is attached to that post immediately.
 // Otherwise the media is orphan (postId = null) and can be attached via
 // POST /posts { mediaIds: [...] }.
@@ -13,6 +17,16 @@ import { detectMediaType, finalizeMediaType, sanitizeFilenameForKey, ALLOWED_MIM
 
 export default async function mediaRoutes(app) {
   app.get("/allowed-mimes", async () => ({ mimes: ALLOWED_MIMES }));
+
+  // Permanent link. The DB stores this path, never a raw signed URL.
+  // Every request here mints a fresh, short-lived signed URL and redirects
+  // to it — so the link the browser/frontend sees never breaks.
+  app.get("/blob/:key", async (req, reply) => {
+    const key = decodeURIComponent(req.params.key);
+    let target = await getSignedDownloadUrl(key, 300); // fresh 5-min token
+    if (target.startsWith("/")) target = absolutizeLocalUrl(req, target);
+    return reply.redirect(302, target);
+  });
 
   app.post("/upload", async (req, reply) => {
     if (!req.isMultipart()) {
@@ -68,9 +82,9 @@ export default async function mediaRoutes(app) {
       return reply.code(502).send({ error: "storage_upload_failed", detail: err.message });
     }
 
-    // Build the URL
-    let url = await getSignedDownloadUrl(key);
-    if (url.startsWith("/")) url = absolutizeLocalUrl(req, url);
+    // PERMANENT URL — points at our own server, which mints a fresh
+    // signed B2 URL on every request. Never expires from the client's side.
+    const url = absolutizeLocalUrl(req, `/media/blob/${encodeURIComponent(key)}`);
 
     // Persist Media row
     let media;
@@ -80,6 +94,7 @@ export default async function mediaRoutes(app) {
           postId: postId || null,
           type: mediaType,
           url,
+          key,
           filename: filename || "file",
           mimeType: detection.mime,
           size: buf.length,
