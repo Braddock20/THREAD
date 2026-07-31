@@ -31,6 +31,7 @@ model Media {
   post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
   type      String   // image | video | audio | file | apk | voice_note
   url       String
+  key       String?  // raw storage key — lets us always re-sign a fresh B2 URL
   filename  String
   mimeType  String
   size      Int
