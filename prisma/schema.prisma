@@ -27,11 +27,10 @@ model Post {
 
 model Media {
   id        String   @id @default(cuid())
-  postId    String?
+  postId    String?  // null = uploaded but not yet attached to a post
   post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
-  type      String
+  type      String   // image | video | audio | file | apk | voice_note
   url       String
-  key       String?  // NEW — raw storage key, lets us always re-sign a fresh URL
   filename  String
   mimeType  String
   size      Int
