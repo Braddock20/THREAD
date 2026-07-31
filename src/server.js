@@ -1,9 +1,16 @@
 // src/server.js — Fastify bootstrap for Glass Journal.
 // Auth: none (handled by a separate backend).
+//
+// CHANGES IN THIS VERSION (2026-07-28):
+//   - Added @fastify/cors so the API can be called from any browser origin.
+//   - CORS is opt-in via env (CORS_ORIGIN) so you can lock it down later.
+//   - Same behavior otherwise — health, rate limit, multipart, routes unchanged.
+
 import Fastify from "fastify";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
+import fastifyCors from "@fastify/cors";
 import cfg from "./config.js";
 import postRoutes from "./routes/posts.js";
 import mediaRoutes from "./routes/media.js";
@@ -24,6 +31,30 @@ const app = Fastify({
 
 async function start() {
   await app.register(sensible);
+
+  // ---- CORS ----
+  // Allow browser frontends to call this API from other origins.
+  // CORS_ORIGIN env var:
+  //   "*"                      → any origin (good for personal use, what the spec implies)
+  //   "https://a.com,https://b.com" → specific origins only
+  //   unset / empty            → same-origin only (no CORS headers sent)
+  //
+  // We also handle preflight (OPTIONS) and echo the request headers/method.
+  const corsOrigin = (cfg.CORS_ORIGIN ?? "*").trim();
+  await app.register(fastifyCors, {
+    origin: corsOrigin === "*" ? true : corsOrigin.split(",").map((s) => s.trim()).filter(Boolean),
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    // Allow all common headers — Content-Type is needed for JSON bodies,
+    // and signed-URL fetches from B2 will use Range, etc.
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin", "Range"],
+    exposedHeaders: [
+      "X-RateLimit-Limit",
+      "X-RateLimit-Remaining",
+      "X-RateLimit-Reset",
+    ],
+    credentials: false, // we don't use cookies; auth is a separate backend
+    maxAge: 86400, // cache preflight for 24h
+  });
 
   // Baseline global rate-limit (200 req/min per IP).
   await app.register(rateLimit, {
@@ -106,7 +137,8 @@ async function start() {
     }
     app.log.info(
       `glass-journal listening on ${addr} (env=${cfg.NODE_ENV}, ` +
-      `storage=${cfg.STORAGE_DRIVER}, max_upload=${Math.round(cfg.MAX_UPLOAD_BYTES / 1024 / 1024)}MB)`
+      `storage=${cfg.STORAGE_DRIVER}, max_upload=${Math.round(cfg.MAX_UPLOAD_BYTES / 1024 / 1024)}MB, ` +
+      `cors=${corsOrigin})`
     );
   });
 }
