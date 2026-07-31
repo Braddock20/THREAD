@@ -25,7 +25,7 @@ export default async function mediaRoutes(app) {
     const key = decodeURIComponent(req.params.key);
     let target = await getSignedDownloadUrl(key, 300); // fresh 5-min token
     if (target.startsWith("/")) target = absolutizeLocalUrl(req, target);
-    return reply.redirect(302, target);
+    return reply.redirect(target, 302);
   });
 
   app.post("/upload", async (req, reply) => {
